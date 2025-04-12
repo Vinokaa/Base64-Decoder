@@ -2,132 +2,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-typedef struct Node Node;
-typedef struct LinkedList LinkedList;
-
-struct Node{
-    char c;
-    Node* next;
-};
-
-struct LinkedList{
-    Node* head;
-    Node* tail;
-    void (*insert)(LinkedList*, Node*);
-    void (*insertB64)(LinkedList*, char);
-    char (*remove)(LinkedList*);
-    unsigned char (*removeByte)(LinkedList*);
-    int (*isEmpty)(LinkedList*);
-};
-
-void listInsert(LinkedList* list, Node* n){
-    if(list->head == NULL){
-        list->head = n;
-    }else{
-        list->tail->next = n;
-    }
-
-    while(n->next != NULL){
-        n = n->next;
-    }
-
-    list->tail = n;
-}
-
-void listInsertB64(LinkedList* list, char c){
-    Node* toBeInserted = NULL;
-    Node* tmp;
-
-    if(c == '='){
-        // Padding
-
-        for(int i = 0; i < 2; i++){
-            tmp = toBeInserted;
-            toBeInserted = (Node*) malloc(sizeof(Node));
-            toBeInserted->c = '0';
-            toBeInserted->next = tmp;
-        }
-    }else{
-        // Not padding
-
-        if(c >= 'A' && c <= 'Z'){
-            c -= 65;
-        }else if(c >= 'a' && c <= 'z'){
-            c -= 71;
-        }else if(c >= '0' && c <= '9'){
-            c += 4;
-        }else if(c == '+'){
-            c += 19;
-        }else if(c == '/'){
-            c += 16;
-        }
-        
-        for(int i = 0; i < 6; i++){
-            tmp = toBeInserted;
-            toBeInserted = (Node*) malloc(sizeof(Node));
-            toBeInserted->c = c % 2 + '0';
-            toBeInserted->next = tmp;
-            c = c / 2;
-        }
-    }
-
-    list->insert(list, toBeInserted);
-}
-
-char listRemove(LinkedList* list){
-    Node* removedNode = list->head;
-
-    if(removedNode == NULL) return 0;
-
-    char c = removedNode->c;
-
-    list->head = list->head->next;
-
-    free(removedNode);
-
-    return c;
-}
-
-int power(int n, int power){
-    if(power == 0) return 1;
-
-    int origin_n = n;
-    
-    for(int i = 1; i < power; i++){
-        n *= origin_n;
-    }
-
-    return n;
-}
-
-unsigned char listRemoveByte(LinkedList* list){
-    unsigned char b = 0;
-
-    for(int i = 7; i >= 0; i--){
-        b += (list->remove(list) - '0') * power(2, i);
-    }
-
-    return b;
-}
-
-int listIsEmpty(LinkedList* list){
-    return list->head == NULL;
-}
-
-LinkedList* LinkedListConstructor(){
-    LinkedList* list = (LinkedList*) malloc(sizeof(LinkedList));
-
-    list->head = NULL;
-    list->tail = NULL;
-    list->insert = &listInsert;
-    list->insertB64 = &listInsertB64;
-    list->remove = &listRemove;
-    list->removeByte = &listRemoveByte;
-    list->isEmpty = &listIsEmpty;
-
-    return list;
-}
-
 void txtToMp3Extension(char* src, char* dst){
     char file_extension[6] = "";
     int dot_start = 0;
@@ -152,6 +26,25 @@ void txtToMp3Extension(char* src, char* dst){
     dst[dot_start] = '\0';
 }
 
+unsigned char b64ToB(unsigned char c){
+    if(c >= 'A' && c <= 'Z'){
+        c -= 'A';
+    }else if(c >= 'a' && c <= 'z'){
+        c -= 71;
+    }else if(c >= '0' && c <= '9'){
+        c += 4;
+    }else if(c == '+'){
+        c += 19;
+    }else if(c == '/'){
+        c += 16;
+    }else{
+        // padding
+        c = 0;
+    }
+
+    return c;
+}
+
 int main(int argc, char** argv){
     if(argc < 2) return 1;
 
@@ -162,25 +55,38 @@ int main(int argc, char** argv){
 
     FILE* text_file = fopen(src_file, "r");
 
-    FILE* audio_file = fopen(binary_file_name, "wb");
-
-    LinkedList* list = LinkedListConstructor();
+    FILE* output_file = fopen(binary_file_name, "wb");
 
     char c;
+    unsigned char byte, last_byte, toWrite;
 
-    while((c = fgetc(text_file)) != EOF){
-        list->insertB64(list, c);
-    }
-
-    unsigned char b;
-
-    while(!list->isEmpty(list)){
-        b = list->removeByte(list);
-        fwrite(&b, 1, 1, audio_file);
+    for(int i = 0; (c = fgetc(text_file)) != EOF; i++){
+        byte = b64ToB(c);
+        
+        switch(i % 4){
+            case 0:
+                last_byte = byte << 2;
+                break;
+            case 1:
+                toWrite = last_byte | (byte >> 4);
+                fwrite(&toWrite, 1, 1, output_file);
+                last_byte = byte << 4;
+                break;
+            case 2:
+                toWrite = last_byte | (byte >> 2);
+                fwrite(&toWrite, 1, 1, output_file);
+                last_byte = byte << 6;
+                break;
+            case 3:
+                toWrite = last_byte | byte;
+                fwrite(&toWrite, 1, 1, output_file);
+                break;
+        }
+        
     }
 
     fclose(text_file);
-    fclose(audio_file);
+    fclose(output_file);
 
     return 0;
 }
